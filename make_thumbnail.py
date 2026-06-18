@@ -16,10 +16,10 @@ D = json.load(open(os.path.join(HERE, "shots.json")))
 shots = np.array(D["players"]["Stephen Curry"], dtype=float)
 league, lg_overall = D["leagueByDistance"], D["leagueOverall"]
 
-CARD = "#f4f4f5"   # matches the website's light figure card
+CARD = "#0a0a0b"   # matches the site's dark background / dark-native chart
 cmap = LinearSegmentedColormap.from_list("hot", ["#3b82f6", "#5b5b66", "#e0992f", "#ef4444"])
 
-def draw_court(ax, color="#b8b8bf", lw=1.6):
+def draw_court(ax, color="#46464f", lw=1.6):
     ax.add_patch(Circle((0, 0), 7.5, fill=False, color=color, lw=lw))
     ax.add_patch(Rectangle((-30, -9), 60, 0, color=color, lw=lw))
     ax.add_patch(Rectangle((-80, -47.5), 160, 190, fill=False, color=color, lw=lw))
