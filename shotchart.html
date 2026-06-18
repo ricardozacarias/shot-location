@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NBA shot chart — 2015-16</title>
+<style>
+  :root{
+    --bg:#0a0a0b; --fg:#ededee; --muted:#a1a1aa; --dim:#6b6b76;
+    --border:#232328; --line:#3a3a42; --accent:#2dd4bf;
+    --cold:#3b82f6; --neutral:#5b5b66; --warm:#f59e0b; --hot:#ef4444;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:620px;margin:0 auto;padding:14px 16px 20px}
+  .mono{font-family:ui-monospace,"SF Mono",Menlo,monospace}
+  /* controls */
+  .controls{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:10px}
+  .pick label{display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);margin-bottom:5px}
+  .sel{position:relative;display:inline-block}
+  select{appearance:none;-webkit-appearance:none;background:#141417;color:var(--fg);
+    border:1px solid var(--border);border-radius:8px;padding:9px 34px 9px 12px;font-size:15px;font-weight:600;
+    cursor:pointer;outline:none;transition:border-color .15s}
+  select:hover{border-color:var(--line)}
+  select:focus{border-color:var(--accent)}
+  .sel::after{content:"▾";position:absolute;right:12px;top:50%;transform:translateY(-50%);
+    pointer-events:none;color:var(--muted);font-size:12px}
+  .stat{text-align:right;line-height:1.25}
+  .stat .big{font-size:22px;font-weight:700;letter-spacing:-.01em}
+  .stat .big b{color:var(--accent)}
+  .stat .sub{font-size:12px;color:var(--dim)}
+  /* chart */
+  .court-wrap{position:relative}
+  svg{display:block;width:100%;height:auto;touch-action:none}
+  .court{fill:none;stroke:var(--line);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  .hex{stroke:#0a0a0b;stroke-width:.6;cursor:pointer}
+  .hex:hover{stroke:#fff;stroke-width:1.2}
+  /* legend */
+  .legend{display:flex;align-items:center;justify-content:space-between;gap:18px;flex-wrap:wrap;
+    margin-top:10px;font-size:11px;color:var(--muted)}
+  .legrow{display:flex;align-items:center;gap:8px}
+  .bar{width:128px;height:9px;border-radius:5px;
+    background:linear-gradient(90deg,var(--cold),var(--neutral) 50%,var(--warm),var(--hot))}
+  .legrow .cap{color:var(--dim)}
+  /* tooltip */
+  .tip{position:absolute;pointer-events:none;background:#16161a;border:1px solid var(--line);
+    border-radius:8px;padding:8px 10px;font-size:12px;line-height:1.45;color:var(--fg);
+    box-shadow:0 6px 24px rgba(0,0,0,.5);opacity:0;transition:opacity .12s;max-width:200px;z-index:5}
+  .tip .t-fg{font-weight:700;font-size:14px}
+  .tip .t-d{color:var(--muted)}
+  .tip .pos{color:#fb7185}.tip .neg{color:#60a5fa}
+  .foot{margin-top:12px;font-size:11px;color:var(--dim);line-height:1.5}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="controls">
+    <div class="pick">
+      <label for="player">Player · 2015-16 regular season</label>
+      <div class="sel"><select id="player"></select></div>
+    </div>
+    <div class="stat">
+      <div class="big" id="fg"></div>
+      <div class="sub mono" id="att"></div>
+    </div>
+  </div>
+
+  <div class="court-wrap">
+    <svg id="chart" viewBox="-268 -16 536 502" preserveAspectRatio="xMidYMid meet" aria-label="Shot chart"></svg>
+    <div class="tip" id="tip"></div>
+  </div>
+
+  <div class="legend">
+    <div class="legrow">
+      <span class="cap">Colder</span>
+      <span class="bar"></span>
+      <span class="cap">Hotter than league avg</span>
+    </div>
+    <div class="legrow" id="sizeleg">
+      <span class="cap">Fewer</span>
+      <span class="cap" style="color:var(--muted)">●&nbsp;attempts&nbsp;●</span>
+      <span class="cap">More</span>
+    </div>
+  </div>
+
+  <div class="foot">
+    Hexagon <b style="color:var(--muted)">size</b> = how often shots came from that spot ·
+    <b style="color:var(--muted)">color</b> = the player's FG% there vs. the league average from that distance.
+    Data: 2015-16 play-by-play (eightthirtyfour.com).
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3-hexbin@0.2/build/d3-hexbin.min.js"></script>
+<script>
+const svg = d3.select("#chart");
+const tip = d3.select("#tip");
+const FY = 422.5;                       // flip: screenY = FY - courtY
+const fy = y => FY - y;
+
+// ---- court ( NBA units: hoop at 0,0, 10 units = 1 ft ) ----
+function arc(cx,cy,r,a0,a1,n=60){
+  const pts=[];
+  for(let i=0;i<=n;i++){const a=a0+(a1-a0)*i/n; pts.push([cx+r*Math.cos(a), cy+r*Math.sin(a)]);}
+  return pts;
+}
+const line = d3.line().x(d=>d[0]).y(d=>fy(d[1]));
+function drawCourt(){
+  const g = svg.append("g").attr("class","court");
+  const P=Math.PI;
+  const paths=[
+    // outer boundary (baseline + sidelines + half-court line)
+    [[-250,-47.5],[250,-47.5],[250,422.5],[-250,422.5],[-250,-47.5]],
+    // outer paint
+    [[-80,-47.5],[80,-47.5],[80,142.5],[-80,142.5],[-80,-47.5]],
+    // inner paint
+    [[-60,-47.5],[60,-47.5],[60,142.5],[-60,142.5]],
+    // backboard
+    [[-30,-7.5],[30,-7.5]],
+    // free-throw top arc
+    arc(0,142.5,60,0,P),
+    // free-throw bottom arc (dashed handled separately)
+    // restricted area
+    arc(0,0,40,0,P),
+    // 3pt: left corner, arc, right corner
+    [[-220,-47.5],[-220,92.5]],
+    arc(0,0,237.5, Math.acos(220/237.5), P-Math.acos(220/237.5)),
+    [[220,92.5],[220,-47.5]],
+    // center circle (half toward baseline)
+    arc(0,422.5,60,P,2*P),
+  ];
+  paths.forEach(p=>g.append("path").attr("d",line(p)));
+  // dashed FT bottom arc
+  g.append("path").attr("d",line(arc(0,142.5,60,P,2*P)))
+    .attr("stroke-dasharray","6 7").attr("opacity",.8);
+  // hoop ring
+  g.append("circle").attr("cx",0).attr("cy",fy(0)).attr("r",7.5).attr("stroke-width",2);
+}
+
+// ---- hex generators ----
+const R = 15;
+const hexbin = d3.hexbin().x(d=>d.sx).y(d=>d.sy).radius(R)
+  .extent([[-250,fy(422.5)],[250,fy(-47.5)]]);
+const radius = d3.scaleSqrt().range([R*0.32, R*0.94]).clamp(true);
+// diverging color: player FG% minus league FG% at that distance
+const color = d3.scaleLinear()
+  .domain([-0.10,-0.04,0,0.04,0.10])
+  .range(["#3b82f6","#5e7fb0","#5b5b66","#e0992f","#ef4444"])
+  .interpolate(d3.interpolateHcl).clamp(true);
+
+let DATA=null;
+
+function render(name){
+  const shots = DATA.players[name];
+  // map to screen + filter to plotting region
+  const pts = [];
+  for(const [x,y,m] of shots){
+    if(x<-250||x>250||y<-47.5||y>422.5) continue;
+    pts.push({sx:x, sy:fy(y), m, dist:Math.hypot(x,y)/10});
+  }
+  // stats header
+  const made=shots.reduce((a,s)=>a+s[2],0);
+  d3.select("#fg").html(`<b>${(made/shots.length*100).toFixed(1)}%</b> FG`);
+  d3.select("#att").text(`${made} / ${shots.length} shots`);
+
+  const bins = hexbin(pts).filter(b=>b.length>=2);
+  radius.domain([2, d3.quantile(bins.map(b=>b.length).sort(d3.ascending),0.92)||10]);
+
+  bins.forEach(b=>{
+    b.att=b.length;
+    b.makes=d3.sum(b,d=>d.m);
+    b.fg=b.makes/b.att;
+    b.meanDist=d3.mean(b,d=>d.dist);
+    const lg=DATA.leagueByDistance[Math.max(0,Math.min(35,Math.round(b.meanDist)))] ?? DATA.leagueOverall;
+    b.lg=lg; b.diff=b.fg-lg;
+  });
+
+  const sel = svg.selectAll(".hex").data(bins,d=>d.x+"_"+d.y);
+  sel.exit().transition().duration(250).attr("opacity",0).remove();
+  const ent = sel.enter().append("path").attr("class","hex")
+    .attr("transform",d=>`translate(${d.x},${d.y})`)
+    .attr("d",hexbin.hexagon(0.5)).attr("opacity",0)
+    .on("pointerenter",showTip).on("pointermove",moveTip).on("pointerleave",hideTip);
+  ent.merge(sel)
+    .attr("transform",d=>`translate(${d.x},${d.y})`)
+    .transition().duration(420)
+    .attr("opacity",1)
+    .attr("fill",d=>color(d.diff))
+    .attr("d",d=>hexbin.hexagon(radius(d.att)));
+}
+
+function showTip(ev,d){
+  const sign=d.diff>=0?"+":"";
+  const cls=d.diff>=0?"pos":"neg";
+  tip.html(`<div class="t-fg">${d.makes}/${d.att} · ${(d.fg*100).toFixed(0)}%</div>`+
+    `<div class="t-d">${d.meanDist.toFixed(0)} ft · league ${(d.lg*100).toFixed(0)}%</div>`+
+    `<div class="${cls}">${sign}${(d.diff*100).toFixed(0)} pts vs. league</div>`)
+    .style("opacity",1);
+  moveTip(ev,d);
+}
+function moveTip(ev){
+  const r=svg.node().getBoundingClientRect();
+  const x=ev.clientX-r.left, y=ev.clientY-r.top;
+  const w=tip.node().offsetWidth, h=tip.node().offsetHeight;
+  tip.style("left",Math.min(Math.max(x-w/2,4),r.width-w-4)+"px")
+     .style("top",(y-h-14)+"px");
+}
+function hideTip(){tip.style("opacity",0);}
+
+drawCourt();
+d3.json("shots.json").then(d=>{
+  DATA=d;
+  const sel=d3.select("#player");
+  sel.selectAll("option").data(d.playerOrder).enter().append("option")
+    .attr("value",x=>x).text(x=>x);
+  sel.on("change",function(){render(this.value);});
+  render(d.playerOrder[0]);
+});
+</script>
+</body>
+</html>
