@@ -6,8 +6,7 @@ colored by how their field-goal percentage compared to the league average from
 that distance.
 
 Stephen Curry's unanimous-MVP season is the default view; thirteen other stars
-are a dropdown away. Published as a post on my site (Data Stories): *I just love
-shot charts*.
+are a dropdown away. There's an interactive write-up on my site: **[Heat Check](https://zacalab.com/blog/a-map-of-currys-range)**.
 
 ![Curry's shot map](thumbnail.png)
 
